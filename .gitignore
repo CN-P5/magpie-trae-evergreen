@@ -1,0 +1,11 @@
+node_modules/
+*.tgz
+SHA256SUMS.txt
+artifacts/
+__pycache__/
+*.pyc
+.env
+.env.*
+connection.json
+managed-models.json
+local-credential.json
