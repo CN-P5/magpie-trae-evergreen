@@ -6,15 +6,17 @@ Use Magpie models and routing groups from Trae CN's own model picker. This is an
 
 ## Compatibility and installation
 
-Tested with Windows, Magpie 0.1.3078 and a specific Trae CN 3.4.18 build. Internal model APIs and native credential encoding are build dependent. Version and SHA-256 guards reject unknown client builds. Other operating systems and Trae international are not supported yet.
+Supports verified Windows builds of Trae CN 3.4.18 and 3.4.20. The former was tested with Magpie 0.1.3078; the latter with Magpie 0.1.3960. Internal model APIs and native credential encoding are build dependent. Version and SHA-256 guards reject unknown client builds. Other operating systems and Trae international are not supported yet.
+
+Version 0.3.4 restores model additions after updating Trae to 3.4.20 and adapts the client refresh component to that build. Both native DLLs remain hash guarded. Client entry-point backups are stored separately for each Trae version, so rollback uses the matching original file.
 
 Install and sign in to Trae CN, configure working models in Magpie, then run:
 
 ```sh
-magpie plugin add "github:lmy414/magpie-agent-trae#v0.3.3"
+magpie plugin add "github:lmy414/magpie-agent-trae#v0.3.4"
 ```
 
-Enable Trae on Magpie's Agents page. Expand the remaining agents if the row is collapsed. Restart Trae once after the first installation of the refresh component, then choose a model ending in `· Magpie`. Keep Magpie running and Trae signed in. Install only one of the standalone and community packages.
+Enable Trae on Magpie's Agents page. Expand the remaining agents if the row is collapsed. Restart Trae once after the refresh component is first installed or reinstalled after a Trae upgrade, then choose a model ending in `· Magpie`. Keep Magpie running and Trae signed in. Install only one of the standalone and community packages.
 
 ## Behavior
 
@@ -46,7 +48,11 @@ No npm dependencies are required. Run `npm test` on Node.js 20 or newer. `npm ru
 
 Version 0.3.3 passed 54 unit tests, nine isolated Magpie integration checks and live TraeWork catalog add, replace and disconnect checks. Menu refresh took about 1.1–1.6 seconds after synchronization completed. Real DeepSeek chat was verified separately; other upstream models require their own validation.
 
-The source also includes an optional, hash-guarded cancellation race patch in `scripts/trae-cancel-patch.mjs`, with `--check`, `--apply` and `--restore`. It is not automatically applied or included in the runtime package. `npm run test:cancel` checks the installed source against six regression cases. Full manual cancellation acceptance is still pending. Restart Trae after applying or restoring it, retain its backup, and revalidate after client upgrades.
+Version 0.3.4 passes 56 unit tests on Node and Bun, including upgrade backup/restore and refusal of unverified DLL builds, plus nine isolated Magpie integration checks. On Trae CN 3.4.20, native model creation, updates, deletion and readback were verified, and the temporary entry was removed. The user confirmed model additions, removals and open-window menu refresh after restarting Trae.
+
+This compatibility update does not fix the long-session `3003 / SSE finish` failure. Diagnostics observed a failed continuation after a tool result was submitted and HTTP 500 responses from Trae's cloud; the root cause remains unconfirmed, including whether context size contributed.
+
+The source also includes an optional, hash-guarded cancellation race patch in `scripts/trae-cancel-patch.mjs`, with `--check`, `--apply` and `--restore`. **It supports only the verified 3.4.18 build, not 3.4.20.** It is not automatically applied or included in the runtime package. `npm run test:cancel` checks the installed source against six regression cases on 3.4.18. Full manual cancellation acceptance is still pending. Restart Trae after applying or restoring it, retain its backup, and revalidate after client upgrades.
 
 ## License
 

@@ -64,3 +64,19 @@ test('unsupported client version is refused before reading native codec material
   fs.writeFileSync(file, '{"appVersion":"unverified-version"}');
   assert.throws(() => readNativeCredentialProfile({ local }), /trae_credential_version_unsupported/);
 });
+
+test('a supported version still refuses DLLs from an unverified build', t => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-unverified-build-'));
+  t.after(() => fs.rmSync(local, { recursive: true, force: true }));
+  const app = path.join(local, 'Programs/Trae CN/resources/app');
+  const modules = path.join(app, 'modules/ai-agent');
+  fs.mkdirSync(modules, { recursive: true });
+  const material = 'a'.repeat(64) + 'b'.repeat(20);
+  fs.writeFileSync(path.join(modules, 'harness.dll'), material + 'key too shortrandom too short');
+  fs.writeFileSync(path.join(modules, 'ai_agent.dll'), 'a'.repeat(64) + '0123456789' + 'b'.repeat(20) +
+    'apps\\icube_server_rs\\crates\\llm-client\\src\\crypto\\crypto.rs');
+  for (const version of ['3.4.18', '3.4.20']) {
+    fs.writeFileSync(path.join(app, 'product.json'), JSON.stringify({ appVersion: version }));
+    assert.throws(() => readNativeCredentialProfile({ local }), /trae_credential_build_unsupported/);
+  }
+});

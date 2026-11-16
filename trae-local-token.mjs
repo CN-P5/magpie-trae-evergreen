@@ -5,8 +5,16 @@ import { LOCAL_TOKEN } from './bridge.mjs';
 
 const SOURCE_MARKER = Buffer.from('apps\\icube_server_rs\\crates\\llm-client\\src\\crypto\\crypto.rs');
 const HARNESS_MARKER = Buffer.from('key too shortrandom too short');
-const HARNESS_SHA256 = '11b4c76ac34c31a93a5bf4992444e4c406cfd293dcefd89a73d11801841dcb48';
-const LEGACY_SHA256 = '62f6a4e43c778a8114d0b77073d8425c9bd855ffeb815ba1946d0357c133448d';
+const VERIFIED_BUILDS = {
+  '3.4.18': {
+    harness: '11b4c76ac34c31a93a5bf4992444e4c406cfd293dcefd89a73d11801841dcb48',
+    legacy: '62f6a4e43c778a8114d0b77073d8425c9bd855ffeb815ba1946d0357c133448d',
+  },
+  '3.4.20': {
+    harness: 'b6ba131bd7aa2286313be04fbdc3ba02ede98496c88e227d5f627c806569044d',
+    legacy: '522dade20f33bf10c77fdadef7e1fff90755c461b4eb52c5ebbfee000f485677',
+  },
+};
 let cachedProfile;
 
 // Vendor codec constants stay in the installed client. Scan with bounded memory;
@@ -37,14 +45,15 @@ export function readNativeCredentialProfile({ local = process.env.LOCALAPPDATA }
   if (!local) throw new Error('trae_installation_unavailable');
   const app = path.join(local, 'Programs/Trae CN/resources/app');
   const version = JSON.parse(fs.readFileSync(path.join(app, 'product.json'), 'utf8')).appVersion;
-  if (version !== '3.4.18') throw new Error('trae_credential_version_unsupported');
+  const build = Object.hasOwn(VERIFIED_BUILDS, version) ? VERIFIED_BUILDS[version] : null;
+  if (!build) throw new Error('trae_credential_version_unsupported');
   const root = path.join(app, 'modules/ai-agent');
   const files = ['harness.dll', 'ai_agent.dll'].map(name => path.join(root, name));
-  const identity = files.map(file => { const s = fs.statSync(file); return `${file}:${s.size}:${s.mtimeMs}`; }).join('|');
+  const identity = version + '|' + files.map(file => { const s = fs.statSync(file); return `${file}:${s.size}:${s.mtimeMs}`; }).join('|');
   if (cachedProfile?.identity === identity) return cachedProfile;
   const harness = inspect(files[0], HARNESS_MARKER, 84);
   const legacy = inspect(files[1], SOURCE_MARKER, 94);
-  if (harness.digest !== HARNESS_SHA256 || legacy.digest !== LEGACY_SHA256) throw new Error('trae_credential_build_unsupported');
+  if (harness.digest !== build.harness || legacy.digest !== build.legacy) throw new Error('trae_credential_build_unsupported');
   const a = legacy.prefix.toString('ascii'), h = harness.prefix.toString('ascii');
   if (!/^[0-9a-f]{84}$/.test(h) || !/^[0-9a-f]{64}[0-9]{10}[0-9a-f]{20}$/.test(a) ||
       a.slice(0, 64) !== h.slice(0, 64) || a.slice(74) !== h.slice(64)) throw new Error('trae_credential_profile_unknown');

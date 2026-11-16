@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import notifier from '../trae-refresh-notifier.cjs';
-import { installClientRefresh, LOADER } from '../client-refresh.mjs';
+import { installClientRefresh, LOADER, loaderFor } from '../client-refresh.mjs';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-refresh-test-'));
@@ -48,4 +48,31 @@ test('client installation is hash guarded, idempotent and exactly reversible', t
   fs.writeFileSync(main, 'other build');
   assert.throws(() => installClientRefresh(options), /build_unsupported/);
   assert.equal(fs.readFileSync(main, 'utf8'), 'other build');
+});
+
+test('an upgrade keeps separate backups and restores the new original', t => {
+  const root = fixture(t), app = path.join(root, 'Programs/Trae CN/resources/app');
+  fs.mkdirSync(path.join(app, 'out'), { recursive: true });
+  const main = path.join(app, 'out/main.js');
+  const original18 = '/* native 3.4.18 fixture */\n', original20 = '/* native 3.4.20 fixture */\n';
+  for (const [version, original] of [['3.4.18', original18], ['3.4.20', original20]]) {
+    fs.writeFileSync(path.join(app, 'product.json'), JSON.stringify({ appVersion: version }));
+    fs.writeFileSync(main, original);
+    const options = { local: root, home: root, expectedHash: createHash('sha256').update(original).digest('hex') };
+    const result = installClientRefresh(options);
+    assert.equal(result.version, version);
+    assert.equal(fs.readFileSync(main, 'utf8'), original + loaderFor(version));
+    assert.equal(installClientRefresh(options).changed, false);
+    if (version === '3.4.20') {
+      installClientRefresh({ ...options, restore: true });
+      assert.equal(fs.readFileSync(main, 'utf8'), original20);
+    }
+  }
+  for (const [version, original] of [['3.4.18', original18], ['3.4.20', original20]]) {
+    assert.equal(fs.readFileSync(path.join(root, '.config/magpie-trae/client-backups', version, 'main.original.js'), 'utf8'), original);
+  }
+  // A version string alone must never authorize a different client file.
+  fs.writeFileSync(main, 'unverified 3.4.20 build');
+  assert.throws(() => installClientRefresh({ local: root, home: root }), /build_unsupported/);
+  assert.equal(fs.readFileSync(main, 'utf8'), 'unverified 3.4.20 build');
 });
