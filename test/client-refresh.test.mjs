@@ -76,3 +76,26 @@ test('an upgrade keeps separate backups and restores the new original', t => {
   assert.throws(() => installClientRefresh({ local: root, home: root }), /build_unsupported/);
   assert.equal(fs.readFileSync(main, 'utf8'), 'unverified 3.4.20 build');
 });
+
+test('an unlisted build is pinned by its own bytes instead of a hash allowlist', t => {
+  const root = fixture(t), app = path.join(root, 'Programs/Trae CN/resources/app'), out = path.join(app, 'out');
+  fs.mkdirSync(out, { recursive: true });
+  fs.writeFileSync(path.join(app, 'product.json'), JSON.stringify({ appVersion: '3.4.22' }));
+  const main = path.join(out, 'main.js');
+  const original = `/* bundle */ BrowserWindow ${'x'.repeat(70000)}\n//# sourceMappingURL=http://trae-cn.local/sourcemaps/stable/2.3.105403/win32/x64/main.js.map\n`;
+  fs.writeFileSync(main, original);
+  const result = installClientRefresh({ local: root, home: root });
+  assert.equal(result.version, '3.4.22');
+  assert.equal(result.changed, true);
+  assert.match(result.originalSha256, /^[a-f0-9]{64}$/);
+  assert.equal(fs.readFileSync(main, 'utf8'), original + loaderFor('3.4.22'));
+  assert.ok(fs.existsSync(path.join(out, 'magpie-model-refresh.cjs')));
+  assert.equal(installClientRefresh({ local: root, home: root }).changed, false);
+  installClientRefresh({ local: root, home: root, restore: true });
+  assert.equal(fs.readFileSync(main, 'utf8'), original);
+  assert.equal(fs.existsSync(path.join(out, 'magpie-model-refresh.cjs')), false);
+  // A file that is not an Electron main bundle is refused before it is pinned.
+  fs.rmSync(path.join(root, '.config'), { recursive: true, force: true });
+  fs.writeFileSync(main, 'not a bundle');
+  assert.throws(() => installClientRefresh({ local: root, home: root }), /build_unsupported/);
+});

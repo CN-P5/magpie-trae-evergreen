@@ -84,7 +84,7 @@ function originalRequest(entry) {
 
 // Only this plugin's endpoint and IDs are managed. The vendor remains the
 // source of truth; nothing is injected into Trae's SQLite cache.
-export async function syncModels({ paths = syncPaths(), apiFactory = () => new TraeAPI(readSession()), credentialFactory = localCredential, port = 3498 } = {}) {
+export async function syncModels({ paths = syncPaths(), apiFactory = () => new TraeAPI(readSession()), credentialFactory = localCredential, port = 3498, writeDelayMs = 300 } = {}) {
   const unlock = lock(paths.lock);
   try {
     const control = read(paths.control, null);
@@ -105,7 +105,11 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
       write(paths.state, state);
     }
     const endpoint = `http://127.0.0.1:${port}/v1/chat/completions`;
-    const ak = connected ? await credentialFactory(paths.credential) : undefined;
+    // Native ciphertext from the account catalog proves the extracted key still
+    // matches this client build; without it the credential module can only
+    // check the envelope layout.
+    const samples = remote.map(entry => entry.ak).filter(value => typeof value === 'string' && value.length >= 28);
+    const ak = connected ? await credentialFactory(paths.credential, { verifyWith: samples }) : undefined;
     const desired = connected ? control.models.map(m => modelRequest(m, endpoint, ak)) : [];
     const active = new Set(desired.map(r => r.model_name));
     const warnings = [];
@@ -165,6 +169,10 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
       }
     }
 
+    // A full catalog can be dozens of models. Space the writes: a burst of
+    // adds from one device is what the account endpoint rate-limits first.
+    let writes = 0;
+    const throttle = async () => { if (writes++ > 0 && writeDelayMs > 0) await delay(writeDelayMs); };
     for (const request of desired) {
       let managed = state.entries[request.model_name];
       let entry = managed && remote.find(e => e.id === managed.id);
@@ -179,6 +187,7 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
           state.entries[request.model_name] = managed; save();
         } else {
           state.pending = { kind: 'add', model: request.model_name, request, credentialFormat: CREDENTIAL_FORMAT }; save();
+          await throttle();
           await api.call('add_custom_model', request); await refresh(list => list.some(e => matching(e, request) && e.name === request.display_name));
           entry = remote.find(e => matching(e, request) && e.name === request.display_name);
           if (!entry) throw new Error('trae_model_create_unverified');
@@ -191,6 +200,7 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
       if (!desiredMatches(entry, request) || managed.credentialFormat !== CREDENTIAL_FORMAT) {
         const body = updateBody(entry, request);
         state.pending = { kind: 'update', model: request.model_name, before: entry, body, credentialFormat: CREDENTIAL_FORMAT }; save();
+        await throttle();
         await api.call('update_custom_model', body); await refresh(list => list.some(e => e.id === managed.id && desiredMatches(e, request)));
         entry = remote.find(e => e.id === managed.id);
         if (!entry || !desiredMatches(entry, request)) throw new Error('trae_model_update_unverified');

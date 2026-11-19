@@ -4,10 +4,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { encodeCredential, decodeCredential, localCredential, readNativeCredentialProfile } from '../trae-local-token.mjs';
+import { locateTraeApp, resetTraeLocationCache } from '../trae-install.mjs';
 import { LOCAL_TOKEN } from '../bridge.mjs';
 
 // Synthetic profile; no vendor codec material or account credentials in tests.
 const profile = { id: 'synthetic-v1', key: Buffer.alloc(32, 0x61), aad: Buffer.from('fixture-auth-data') };
+
+function fakeClient(t, { version = '9.9.9', harness = 'a'.repeat(64) + 'b'.repeat(20),
+  legacy = 'a'.repeat(64) + '0123456789' + 'b'.repeat(20) } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-client-test-'));
+  t.after(() => {
+    resetTraeLocationCache();
+    assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const app = path.join(root, 'resources/app'), modules = path.join(app, 'modules/ai-agent');
+  fs.mkdirSync(modules, { recursive: true });
+  fs.writeFileSync(path.join(app, 'product.json'), JSON.stringify({ appVersion: version }));
+  fs.writeFileSync(path.join(modules, 'harness.dll'), harness + 'key too shortrandom too short');
+  fs.writeFileSync(path.join(modules, 'ai_agent.dll'), legacy + 'apps\\icube_server_rs\\crates\\llm-client\\src\\crypto\\crypto.rs');
+  return { root, app };
+}
 
 test('credential envelope uses a 12-byte nonce and authenticated payload, with fresh nonces', () => {
   const a = encodeCredential(LOCAL_TOKEN, profile), b = encodeCredential(LOCAL_TOKEN, profile);
@@ -39,7 +56,7 @@ test('the unused empty SK still has an authenticated 28-byte native envelope', (
   assert.throws(() => decodeCredential(tampered.toString('base64'), profile), /trae_credential_invalid/);
 });
 
-test('credential cache stays stable across syncs and regenerates for a verified profile change', t => {
+test('credential cache stays stable across syncs and regenerates for a changed profile', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-credential-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, 'credential.json');
@@ -56,27 +73,38 @@ test('credential cache stays stable across syncs and regenerates for a verified 
   assert.equal(fs.readFileSync(file, 'utf8'), '{bad');
 });
 
-test('unsupported client version is refused before reading native codec material', t => {
-  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-unknown-version-'));
-  t.after(() => fs.rmSync(local, { recursive: true, force: true }));
-  const file = path.join(local, 'Programs/Trae CN/resources/app/product.json');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, '{"appVersion":"unverified-version"}');
-  assert.throws(() => readNativeCredentialProfile({ local }), /trae_credential_version_unsupported/);
+test('an unlisted client version is accepted when the envelope layout matches', t => {
+  const { app } = fakeClient(t, { version: '9.9.9' });
+  const found = readNativeCredentialProfile({ app });
+  assert.equal(found.version, '9.9.9');
+  assert.equal(found.verification, 'structure');
+  assert.equal(found.aad.toString(), '0123456789');
+  assert.equal(decodeCredential(encodeCredential(LOCAL_TOKEN, found), found), LOCAL_TOKEN);
 });
 
-test('a supported version still refuses DLLs from an unverified build', t => {
-  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'trae-unverified-build-'));
-  t.after(() => fs.rmSync(local, { recursive: true, force: true }));
-  const app = path.join(local, 'Programs/Trae CN/resources/app');
-  const modules = path.join(app, 'modules/ai-agent');
-  fs.mkdirSync(modules, { recursive: true });
-  const material = 'a'.repeat(64) + 'b'.repeat(20);
-  fs.writeFileSync(path.join(modules, 'harness.dll'), material + 'key too shortrandom too short');
-  fs.writeFileSync(path.join(modules, 'ai_agent.dll'), 'a'.repeat(64) + '0123456789' + 'b'.repeat(20) +
-    'apps\\icube_server_rs\\crates\\llm-client\\src\\crypto\\crypto.rs');
-  for (const version of ['3.4.18', '3.4.20']) {
-    fs.writeFileSync(path.join(app, 'product.json'), JSON.stringify({ appVersion: version }));
-    assert.throws(() => readNativeCredentialProfile({ local }), /trae_credential_build_unsupported/);
-  }
+test('a native catalog ciphertext upgrades the profile to a verified key', t => {
+  const { app } = fakeClient(t, { version: '9.9.9' });
+  const unverified = readNativeCredentialProfile({ app });
+  const native = encodeCredential(LOCAL_TOKEN, unverified);
+  const verified = readNativeCredentialProfile({ app, verifyWith: [native] });
+  assert.equal(verified.verification, 'catalog');
+  assert.equal(verified.id, unverified.id);
+});
+
+test('a catalog ciphertext from another key is refused instead of used', t => {
+  const { app } = fakeClient(t, { version: '9.9.9' });
+  const foreign = encodeCredential(LOCAL_TOKEN, profile);
+  assert.throws(() => readNativeCredentialProfile({ app, verifyWith: [foreign] }), /trae_credential_key_unverified/);
+});
+
+test('DLL material that does not share one key prefix is refused', t => {
+  const { app } = fakeClient(t, { version: '9.9.9', legacy: 'c'.repeat(64) + '0123456789' + 'b'.repeat(20) });
+  assert.throws(() => readNativeCredentialProfile({ app }), /trae_credential_profile_unknown/);
+});
+
+test('the install locator accepts an explicit candidate and rejects empty roots', t => {
+  const { root, app } = fakeClient(t, { version: '9.9.8' });
+  assert.equal(locateTraeApp({ sources: [() => [app]] }).version, '9.9.8');
+  resetTraeLocationCache();
+  assert.throws(() => locateTraeApp({ sources: [() => [path.join(root, 'missing')]] }), /trae_installation_unavailable/);
 });

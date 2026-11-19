@@ -9,7 +9,7 @@ const instance = Symbol.for('magpie.trae.local.bridge.v1');
 export default async function TraeLocalBridge(_input, options = {}) {
   if (!globalThis[instance]) {
     const port = options.port ?? 3498;
-    if (!options.skipNativeSync) {
+    if (!options.skipNativeSync && process.env.MAGPIE_TRAE_NO_CLIENT_PATCH !== '1') {
       try { installClientRefresh(); }
       catch (e) { console.error(`Trae client refresh: ${/^[a-z_0-9]+$/.test(e.message) ? e.message : 'trae_client_refresh_install_failed'}`); }
     }

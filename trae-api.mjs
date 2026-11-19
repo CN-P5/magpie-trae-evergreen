@@ -4,11 +4,12 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { clientDecode } from './vendor/trae-client-codec.mjs';
 import { encodeCredential, readNativeCredentialProfile } from './trae-local-token.mjs';
+import { locateTraeApp, readProduct } from './trae-install.mjs';
 
 const ORIGIN = 'https://trae-api-cn.mchost.guru';
 export const FUNCTIONS = ['chat_v3', 'solo_work_lite', 'solo_agent', 'solo_agent_lite', 'solo_coder'];
 
-export function readSession({ home = os.homedir(), roaming = process.env.APPDATA, local = process.env.LOCALAPPDATA } = {}) {
+export function readSession({ home = os.homedir(), roaming = process.env.APPDATA, local = process.env.LOCALAPPDATA, app } = {}) {
   const file = path.join(roaming || path.join(home, 'AppData/Roaming'), 'Trae CN/User/globalStorage/storage.json');
   const storage = JSON.parse(fs.readFileSync(file, 'utf8'));
   const raw = storage['iCubeAuthInfo://icube.cloudide'];
@@ -19,7 +20,7 @@ export function readSession({ home = os.homedir(), roaming = process.env.APPDATA
   if (!claims.exp || claims.exp * 1000 <= Date.now() + 30000) throw new Error('trae_sign_in_expired');
   const devices = Object.keys(storage).filter(k => /^iCubeAuthInfo:\/\/icube-dc:\d+$/.test(k));
   if (devices.length !== 1) throw new Error('trae_device_unavailable');
-  const product = JSON.parse(fs.readFileSync(path.join(local, 'Programs/Trae CN/resources/app/product.json'), 'utf8'));
+  const product = readProduct(app || locateTraeApp({ local, home }).app).product;
   const region = typeof auth.userRegion === 'string' ? auth.userRegion : auth.userRegion?.region;
   return {
     account: createHash('sha256').update(String(auth.userId)).digest('hex'),
