@@ -374,3 +374,23 @@ test('a journaled entry is never treated as stale, even on a silent port', async
   assert.equal(f.api.entries.length, before);
   assert.equal(result.stale.length, 0);
 });
+
+test('a reordered JSON record is not mistaken for a hand-edited model', async t => {
+  const f = setup(t);
+  await f.sync();
+  const state = f.state();
+  for (const managed of Object.values(state.entries)) {
+    const parsed = JSON.parse(managed.last);
+    const configuration = JSON.parse(parsed.configuration);
+    const reordered = Object.fromEntries(Object.entries(configuration).reverse());
+    managed.last = JSON.stringify({ credential: parsed.credential, configuration: JSON.stringify(reordered) });
+  }
+  fs.writeFileSync(f.paths.state, JSON.stringify(state));
+  const result = await f.sync();
+  assert.deepEqual(result.warnings, []);
+  assert.equal(f.api.entries.length, 2);
+  const healed = f.state();
+  for (const managed of Object.values(healed.entries)) {
+    assert.deepEqual(Object.keys(JSON.parse(managed.last)), ['configuration', 'credential']);
+  }
+});

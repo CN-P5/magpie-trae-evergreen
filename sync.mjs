@@ -63,6 +63,39 @@ function fingerprint(entry) {
   return JSON.stringify({ configuration: legacyFingerprint(entry),
     credential: createHash('sha256').update(String(entry.ak || '')).digest('hex') });
 }
+// JSON key order is not part of a value. The account endpoint has returned the
+// same entry with a different key order between reads, which made an untouched
+// model look hand-edited and stopped it from being managed.
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+function comparable(recorded) {
+  const outer = JSON.parse(recorded);
+  let configuration = outer.configuration;
+  try { configuration = JSON.parse(configuration); } catch { /* already an object */ }
+  return stable({ configuration, credential: outer.credential });
+}
+export function sameRecorded(entry, recorded) {
+  if (!recorded) return false;
+  const current = fingerprint(entry);
+  if (recorded === current) return true;
+  try { return comparable(recorded) === comparable(current); } catch { return false; }
+}
+// The credential is re-encoded with a fresh nonce whenever the plugin restarts,
+// so its ciphertext legitimately differs from the recorded one. Only the
+// configuration part says whether a human edited the entry in Trae.
+export function sameConfiguration(entry, recorded) {
+  if (!recorded) return false;
+  try {
+    const outer = JSON.parse(recorded);
+    const configuration = typeof outer.configuration === 'string' ? JSON.parse(outer.configuration) : outer.configuration;
+    return stable(configuration) === stable(JSON.parse(legacyFingerprint(entry)));
+  } catch { return false; }
+}
 function matching(entry, request) {
   return entry.model === request.model_name && entry.provider === request.provider && entry.baseURL === request.base_url;
 }
@@ -119,7 +152,7 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
     if (!state.pending) {
       for (const managed of Object.values(state.entries)) {
         const entry = remote.find(e => e.id === managed.id);
-        if (entry && managed.last === legacyFingerprint(entry)) managed.last = fingerprint(entry);
+        if (entry && (sameRecorded(entry, managed.last) || managed.last === legacyFingerprint(entry))) { managed.last = fingerprint(entry); delete managed.ak; }
       }
       state.version = 2;
       write(paths.state, state);
@@ -220,12 +253,18 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
           await api.call('add_custom_model', request); await refresh(list => list.some(e => matching(e, request) && e.name === request.display_name));
           entry = remote.find(e => matching(e, request) && e.name === request.display_name);
           if (!entry) throw new Error('trae_model_create_unverified');
-          managed = { id: entry.id, created: true, last: fingerprint(entry), credentialFormat: CREDENTIAL_FORMAT };
+          managed = { id: entry.id, created: true, ak: request.ak, last: fingerprint(entry), credentialFormat: CREDENTIAL_FORMAT };
           state.entries[request.model_name] = managed; state.pending = null; save();
         }
       }
       if (!entry) { warnings.push({ model: request.model_name, code: 'managed_model_removed_in_trae' }); continue; }
-      if (managed.last && managed.last !== fingerprint(entry)) { warnings.push({ model: request.model_name, code: 'model_edited_in_trae' }); continue; }
+      if (managed.last && !sameConfiguration(entry, managed.last)) { warnings.push({ model: request.model_name, code: 'model_edited_in_trae' }); continue; }
+      // The plugin re-encodes its own marker on restart, so a different cipher
+      // is only a manual edit when it is neither ours now nor the one we wrote.
+      if (entry.ak && entry.ak !== request.ak && managed.ak && entry.ak !== managed.ak) {
+        warnings.push({ model: request.model_name, code: 'model_edited_in_trae' }); continue;
+      }
+      if (managed.last !== fingerprint(entry)) { managed.last = fingerprint(entry); save(); }
       if (!desiredMatches(entry, request) || managed.credentialFormat !== CREDENTIAL_FORMAT) {
         const body = updateBody(entry, request);
         state.pending = { kind: 'update', model: request.model_name, before: entry, body, credentialFormat: CREDENTIAL_FORMAT }; save();
@@ -233,7 +272,7 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
         await api.call('update_custom_model', body); await refresh(list => list.some(e => e.id === managed.id && desiredMatches(e, request)));
         entry = remote.find(e => e.id === managed.id);
         if (!entry || !desiredMatches(entry, request)) throw new Error('trae_model_update_unverified');
-        managed.last = fingerprint(entry); managed.credentialFormat = CREDENTIAL_FORMAT; state.pending = null; save();
+        managed.last = fingerprint(entry); managed.ak = request.ak; managed.credentialFormat = CREDENTIAL_FORMAT; state.pending = null; save();
       }
     }
 
@@ -243,7 +282,8 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
       if (active.has(model)) continue;
       const entry = remote.find(e => e.id === managed.id);
       if (!entry) { delete state.entries[model]; save(); continue; }
-      if (managed.last && managed.last !== fingerprint(entry)) { warnings.push({ model, code: 'model_edited_in_trae' }); continue; }
+      if (managed.last && !sameConfiguration(entry, managed.last)) { warnings.push({ model, code: 'model_edited_in_trae' }); continue; }
+      if (managed.last !== fingerprint(entry)) { managed.last = fingerprint(entry); save(); }
       if (managed.created) { await remove(model, entry); continue; }
       const request = originalRequest(managed.before), status = managed.before.status;
       if (!desiredMatches(entry, request, status)) {
