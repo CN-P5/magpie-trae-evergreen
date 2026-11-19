@@ -69,7 +69,7 @@ test('an upgrade keeps separate backups and restores the new original', t => {
     }
   }
   for (const [version, original] of [['3.4.18', original18], ['3.4.20', original20]]) {
-    assert.equal(fs.readFileSync(path.join(root, '.config/magpie-trae/client-backups', version, 'main.original.js'), 'utf8'), original);
+    assert.equal(fs.readFileSync(path.join(root, '.config/magpie-trae-evergreen/client-backups', version, 'main.original.js'), 'utf8'), original);
   }
   // A version string alone must never authorize a different client file.
   fs.writeFileSync(main, 'unverified 3.4.20 build');

@@ -1,7 +1,8 @@
 // A short-lived worker can finish network restoration after a shared host exits.
 import fs from 'node:fs';
 import { syncModels, syncPaths } from './sync.mjs';
-const port = Number(process.argv[2] || 3498);
+import { DEFAULT_PORT } from './identity.mjs';
+const port = Number(process.argv[2] || DEFAULT_PORT);
 try {
   const paths = syncPaths();
   let control;

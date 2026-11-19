@@ -6,11 +6,12 @@ import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { TraeAPI, readSession } from './trae-api.mjs';
 import { localCredential } from './trae-local-token.mjs';
+import { DEFAULT_PORT, configDir } from './identity.mjs';
 
 const CREDENTIAL_FORMAT = 2; // Both AK and empty SK use native envelopes.
 
 export function syncPaths(home = os.homedir()) {
-  const directory = path.join(home, '.config/magpie-trae');
+  const directory = configDir(home);
   return { control: path.join(directory, 'connection.json'), state: path.join(directory, 'managed-models.json'), credential: path.join(directory, 'local-credential.json'),
     lock: path.join(directory, 'model-sync.lock'), status: path.join(directory, 'sync-status.json') };
 }
@@ -84,7 +85,7 @@ function originalRequest(entry) {
 
 // Only this plugin's endpoint and IDs are managed. The vendor remains the
 // source of truth; nothing is injected into Trae's SQLite cache.
-export async function syncModels({ paths = syncPaths(), apiFactory = () => new TraeAPI(readSession()), credentialFactory = localCredential, port = 3498, writeDelayMs = 300 } = {}) {
+export async function syncModels({ paths = syncPaths(), apiFactory = () => new TraeAPI(readSession()), credentialFactory = localCredential, port = DEFAULT_PORT, writeDelayMs = 300 } = {}) {
   const unlock = lock(paths.lock);
   try {
     const control = read(paths.control, null);

@@ -4,10 +4,11 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { pipeline } from 'node:stream';
+import { DEFAULT_PORT, PLUGIN_ID, connectionPath } from './identity.mjs';
 
-export const DEFAULT_PORT = 3498;
+export { DEFAULT_PORT, connectionPath };
 // This is a public marker for a loopback service, never an upstream key.
-export const LOCAL_TOKEN = 'sk-magpie-trae-local-00000000000000000000000000000000';
+export const LOCAL_TOKEN = 'sk-magpie-trae-evergreen-local-0000000000000000000000';
 const VERSION = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
 function syncStatus(file) {
@@ -20,10 +21,6 @@ function syncStatus(file) {
       ...(/^[a-f0-9]{64}$/.test(s.revision || '') ? { revision: s.revision } : {}),
       warnings: Array.isArray(s.warnings) ? s.warnings.map(w => ({ model: String(w.model || ''), code: String(w.code || '') })) : [] };
   } catch { return { state: 'pending', code: 'sync_status_unavailable' }; }
-}
-
-export function connectionPath(home = os.homedir()) {
-  return path.join(home, '.config', 'magpie-trae', 'connection.json');
 }
 
 function readConnection(file, bridgePort) {
@@ -88,7 +85,7 @@ export function createBridge({ file = connectionPath(), port = DEFAULT_PORT, max
     if (req.url === '/health' && req.method === 'GET') {
       let c, error;
       try { c = readConnection(file, server.address()?.port ?? port); } catch (e) { error = e.message; }
-      json(res, 200, { name: 'magpie-trae', version: VERSION, connected: !!c,
+      json(res, 200, { name: PLUGIN_ID, version: VERSION, connected: !!c,
         sync: syncStatus(path.join(path.dirname(file), 'sync-status.json')),
         models: c?.models.map(m => ({ id: m.id, name: m.name })) ?? [], requests: count, lastRequest,
         received, lastInbound, rejected, lastRejection, ...(error ? { error } : {}) });
@@ -132,7 +129,7 @@ export function createBridge({ file = connectionPath(), port = DEFAULT_PORT, max
     const encoded = Buffer.from(JSON.stringify(body));
     const started = Date.now();
     const headers = { authorization: `Bearer ${connection.gatewayKey}`, 'content-type': 'application/json',
-      'content-length': encoded.length, 'user-agent': `magpie-trae/${VERSION}`, accept: body.stream ? 'text/event-stream' : 'application/json' };
+      'content-length': encoded.length, 'user-agent': `${PLUGIN_ID}/${VERSION}`, accept: body.stream ? 'text/event-stream' : 'application/json' };
     const conversation = req.headers['x-magpie-conversation'];
     if (typeof conversation === 'string' && /^[A-Za-z0-9_.:-]{1,200}$/.test(conversation)) headers['x-magpie-conversation'] = conversation;
     const transport = connection.url.protocol === 'https:' ? https : http;

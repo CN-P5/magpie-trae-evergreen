@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createBridge, DEFAULT_PORT } from './bridge.mjs';
 import { installClientRefresh } from './client-refresh.mjs';
+import { PLUGIN_ID } from './identity.mjs';
 
 const command = process.argv[2] || 'status';
 const port = Number(process.env.MAGPIE_TRAE_PORT || DEFAULT_PORT);
@@ -17,7 +18,7 @@ if (command === 'setup') {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
     const status = await response.json();
-    if (!response.ok || status.name !== 'magpie-trae') throw new Error();
+    if (!response.ok || status.name !== PLUGIN_ID) throw new Error();
     console.log(JSON.stringify(command === 'models' ? status.models : status, null, 2));
   } catch { console.error('Trae bridge is not answering. Keep Magpie running and enable this plugin.'); process.exitCode = 1; }
-} else { console.error('Usage: magpie-trae status|models|setup|serve|restore-client'); process.exitCode = 1; }
+} else { console.error(`Usage: ${PLUGIN_ID} status|models|setup|serve|restore-client`); process.exitCode = 1; }

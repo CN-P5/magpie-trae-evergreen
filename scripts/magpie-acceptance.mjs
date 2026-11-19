@@ -14,7 +14,7 @@ import { LOCAL_TOKEN } from '../bridge.mjs';
 
 const exec = promisify(execFile);
 const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-trae-acceptance-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magpie-trae-evergreen-acceptance-'));
 const magpie = process.env.MAGPIE_BIN || path.join(process.env.LOCALAPPDATA, 'Programs/Magpie/Magpie.exe');
 const bun = process.env.MAGPIE_BUN || path.join(os.homedir(), '.cache/magpie/bun/1.4.4/magpie-bun.exe');
 const freePort = async () => {
@@ -55,7 +55,7 @@ const health = async () => { try { return await (await fetch(`${base}/health`, {
 const send = (stream, model = 'fixture/first') => fetch(`${base}/v1/chat/completions`, { method: 'POST', headers: {
   authorization: `Bearer ${LOCAL_TOKEN}`, 'content-type': 'application/json', 'x-forwarded-for': 'fc00::1' },
   body: JSON.stringify({ model, stream, messages: [{ role: 'user', content: 'fixture' }] }) });
-const control = path.join(root, '.config/magpie-trae/connection.json');
+const control = path.join(root, '.config/magpie-trae-evergreen/connection.json');
 try {
   fs.mkdirSync(path.join(env.APPDATA, 'Trae CN'), { recursive: true });
   fs.mkdirSync(path.join(root, '.config/magpie'), { recursive: true });
@@ -70,7 +70,7 @@ try {
   const listed = await run(['ls']); assert.match(listed.stdout, /Trae/);
   pass('Magpie discovers the official Agent descriptor');
   const libraryRoot = path.join(root, '.config/magpie/library');
-  const rule = path.join(root, '.trae-cn/user_rules/magpie.md');
+  const rule = path.join(root, '.trae-cn/user_rules/magpie-evergreen.md');
   const mcp = path.join(env.APPDATA, 'Trae CN/User/mcp.json');
   const skill = path.join(root, '.trae-cn/skills/acceptance-skill/SKILL.md');
   for (const file of [rule, mcp, path.join(libraryRoot, 'skills/acceptance-skill/SKILL.md')]) fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -78,11 +78,11 @@ try {
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { existing: { command: 'existing-user-server' } }, userNote: 'keep' }));
   fs.writeFileSync(path.join(libraryRoot, 'skills/acceptance-skill/SKILL.md'), '---\nname: acceptance-skill\ndescription: Isolated acceptance fixture.\n---\nMAGPIE_SKILL_E2E\n');
   fs.writeFileSync(path.join(root, '.config/magpie/library.json'), JSON.stringify({
-    instructions: { agents: [] }, mcp: [], skills: [{ name: 'acceptance-skill', agents: ['trae-local'] }], copySkills: true,
+    instructions: { agents: [] }, mcp: [], skills: [{ name: 'acceptance-skill', agents: ['trae-cn-evergreen'] }], copySkills: true,
   }));
   const sharedRule = path.join(root, 'shared-rule.md'); fs.writeFileSync(sharedRule, 'MAGPIE_RULE_E2E');
   await run(['library', 'instructions', 'set', sharedRule]);
-  await run(['library', 'instructions', 'agents', 'trae-local']);
+  await run(['library', 'instructions', 'agents', 'trae-cn-evergreen']);
   await run(['library', 'mcp', 'add', 'acceptance-server', 'http://127.0.0.1:9/mcp', 'agents=trae-local']);
   await run(['library', 'sync']);
   assert.match(fs.readFileSync(rule, 'utf8'), /MAGPIE_RULE_E2E/);
@@ -103,7 +103,7 @@ try {
   assert.equal(withdrawn.mcpServers.existing.command, 'existing-user-server');
   assert.equal(withdrawn.userNote, 'keep');
   pass('Library withdrawal removes only its own rules, MCP and skills');
-  await run(['trae-local', 'provider', 'magpie']);
+  await run(['trae-cn-evergreen', 'provider', 'magpie']);
   const connected = JSON.parse(fs.readFileSync(control));
   assert.equal(connected.model, undefined); assert.equal(connected.models.length, 2);
   pass('Magpie writes the complete model catalog without selecting a model');
@@ -126,11 +126,11 @@ try {
   response = await send(false, 'fixture/second'); assert.equal(response.status, 404); await response.text();
   response = await send(false, 'fixture/third'); assert.equal(response.status, 200); assert.match(await response.text(), /accepted-third/);
   pass('Real Magpie model addition and removal update the connected Agent and resident bridge without restart');
-  await run(['trae-local', 'default']);
+  await run(['trae-cn-evergreen', 'default']);
   response = await send(false); assert.equal(response.status, 503);
   assert.deepEqual(JSON.parse(fs.readFileSync(control)), JSON.parse(original));
   pass('Disconnect restores the original fields and refuses new inference');
-  await run(['trae-local', 'provider', 'magpie']);
+  await run(['trae-cn-evergreen', 'provider', 'magpie']);
   await until(async () => (await health()).connected === true, 'reconnect');
   response = await send(false); assert.equal(response.status, 200); await response.text();
   await run(['plugin', 'off', repo]);
@@ -150,7 +150,7 @@ try {
   if (child && child.exitCode === null) { const done = once(child, 'exit'); child.kill(); await done; }
   fixture.closeAllConnections(); await new Promise(resolve => fixture.close(resolve));
   const target = path.resolve(root), parent = path.resolve(os.tmpdir()) + path.sep;
-  if (!target.startsWith(parent) || !path.basename(target).startsWith('magpie-trae-acceptance-')) throw new Error('Unexpected cleanup target');
+  if (!target.startsWith(parent) || !path.basename(target).startsWith('magpie-trae-evergreen-acceptance-')) throw new Error('Unexpected cleanup target');
   // Magpie's Windows helper can release files shortly after its parent exits.
   fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

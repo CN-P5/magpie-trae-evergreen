@@ -113,7 +113,7 @@ test('disconnect deletes created entries and leaves unrelated providers intact',
 test('adopted local entries have their original capability settings restored', async t => {
   const f = setup(t);
   const original = { id: '9', model: models[0].id, provider: 'custom_openai_compatible', name: 'Personal name',
-    ak: 'original-local-marker', baseURL: 'http://127.0.0.1:3498/v1/chat/completions', status: false,
+    ak: 'original-local-marker', baseURL: 'http://127.0.0.1:3499/v1/chat/completions', status: false,
     config: { auth_type: 0 }, detail: { multimodal: false, model_hyper_params: { thinking_enable: 0 }, max_turn: 12 } };
   f.api.entries.push(copy(original)); await f.sync();
   assert.equal(f.api.entries[0].name, 'One · Magpie');
@@ -260,7 +260,7 @@ test('native API sends the verified endpoint, headers and structured request bod
   const api = new TraeAPI({ account: 'fixture', headers: { Authorization: 'fixture-only' } }, { request: async (url, options) => {
     sent = { url, options }; return new Response(JSON.stringify({ code: 0 }), { status: 200 });
   }, encodeEmptySecret: () => encodeCredential('', profile) });
-  const body = modelRequest(models[0], 'http://127.0.0.1:3498/v1/chat/completions', fixtureAK);
+  const body = modelRequest(models[0], 'http://127.0.0.1:3499/v1/chat/completions', fixtureAK);
   await api.call('add_custom_model', body);
   assert.equal(sent.url, 'https://trae-api-cn.mchost.guru/api/ide/v1/add_custom_model');
   const encoded = JSON.parse(sent.options.body);

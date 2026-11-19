@@ -41,7 +41,7 @@ async function fixture(t, respond, options = {}) {
 }
 
 test('Agent is connect-only so model selection belongs to Trae', () => {
-  assert.equal(agent.id, 'trae-local'); assert.equal(agent.model, undefined); assert.equal(agent.effort, undefined);
+  assert.equal(agent.id, 'trae-cn-evergreen'); assert.equal(agent.model, undefined); assert.equal(agent.effort, undefined);
   const out = connect({ gateway: { v1: 'http://127.0.0.1:3425/v1', key: 'fixture-key' }, models: [] });
   assert.equal(out.gatewayKey, 'fixture-key'); assert.equal(out.version, 2); assert.equal(out.model, undefined);
   assert.throws(() => connect({ gateway: {}, model: {} }));
@@ -203,5 +203,5 @@ test('a resident host retries when a short-lived CLI host holds the port', async
   for (let i = 0; i < 30; i++) {
     try { status = await (await fetch(`http://127.0.0.1:${port}/health`)).json(); break; } catch { await delay(20); }
   }
-  assert.equal(status?.name, 'magpie-trae');
+  assert.equal(status?.name, 'magpie-trae-evergreen');
 });

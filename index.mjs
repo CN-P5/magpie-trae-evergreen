@@ -4,11 +4,13 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { installClientRefresh } from './client-refresh.mjs';
 
+import { DEFAULT_PORT } from './identity.mjs';
+
 const instance = Symbol.for('magpie.trae.local.bridge.v1');
 
 export default async function TraeLocalBridge(_input, options = {}) {
   if (!globalThis[instance]) {
-    const port = options.port ?? 3498;
+    const port = options.port ?? DEFAULT_PORT;
     if (!options.skipNativeSync && process.env.MAGPIE_TRAE_NO_CLIENT_PATCH !== '1') {
       try { installClientRefresh(); }
       catch (e) { console.error(`Trae client refresh: ${/^[a-z_0-9]+$/.test(e.message) ? e.message : 'trae_client_refresh_install_failed'}`); }

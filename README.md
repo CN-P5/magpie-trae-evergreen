@@ -1,34 +1,69 @@
-# Magpie Agent for Trae CN
+# Magpie Trae Evergreen
 
 [English](README.en.md)
 
-让 Trae CN 使用 Magpie 中配置的模型和路由组。接入后，在 Trae 自己的模型菜单中切换带“· Magpie”的条目。
+让 Trae CN 使用 Magpie 里配置的模型和路由组。接入后，在 Trae 自己的模型菜单里选择带「· Magpie」的条目。
 
-这是非官方 Agent 适配器，支持 **Windows 上的 Trae CN**。插件调用 Trae 客户端内部接口。早期版本用「版本号 + 文件 SHA-256 白名单」放行，客户端每升级一次就会失配；0.3.5-local 改为按**凭据信封布局 + 服务端密文自检**放行，不再依赖具体构建号。国际版、macOS 和 Linux 尚未适配。
+> **这是什么**：一个 Windows 上的 Trae CN Agent 适配器，把 Magpie 的模型登记成 Trae 的自定义模型，并在本机起一个请求桥接服务。
+>
+> **和原版的区别**：原版靠「客户端版本号 + 文件 SHA-256 白名单」放行，Trae 每升级一次就可能失配；本版改为按**凭据信封布局校验 + 服务端密文自检**放行，不绑定具体构建号。
 
-> **0.3.5-local（本地补丁）**：删除版本/文件哈希白名单，改用标记抽取 + 布局校验 + 「用账号目录里已有的 `ak` 密文解密验真」；新增 `trae-install.mjs` 自动定位安装目录（注册表 → 常规路径 → 客户端启动日志）；菜单热更新改为备份优先、按版本隔离，可用 `MAGPIE_TRAE_NO_CLIENT_PATCH=1` 关闭；同步写入按 300ms 间隔节流。已在本机 Trae CN 3.4.22（`D:\Trae CN`）上通过只读校验：13 条目录、`ak` 解密成功、`out/main.js` 结构校验通过。
+## 二次开发声明
 
+本项目基于 [lmy414/magpie-agent-trae](https://github.com/lmy414/magpie-agent-trae)（作者 [@lmy414](https://github.com/lmy414)）二次开发，沿用其 Agent 接入契约、目录同步、恢复日志与请求桥接的整体设计。原始项目的架构梳理与实现质量打下了绝大部分基础，**感谢原作者的工作**。
 
-| Trae CN | 验证环境 | 验证范围 |
+上游采用 MIT 许可，本项目同样以 MIT 发布，原始版权声明予以保留。
+
+| 项 | 原版 `magpie-agent-trae` | 本项目 `magpie-trae-evergreen` |
 | --- | --- | --- |
-| 3.4.18 指定构建 | Windows、Magpie 0.1.3078 | 保留 0.3.3 已验证的目录同步、窗口刷新和 DeepSeek 聊天支持 |
-| 3.4.20 指定构建 | Windows、Magpie 0.1.3960 | 0.3.4 已验证模型新增、修改、删除和回读，用户重启后确认增删模型与菜单刷新正常 |
+| 客户端放行方式 | 版本号 + DLL/入口文件 SHA-256 白名单 | 布局校验 + 用账号目录已有的 `ak` 密文解密验真 |
+| 新版本 Trae 发布后 | 需等插件更新白名单 | 通常无需改动；方案真变了才报错 |
+| 安装路径 | 假定 `%LOCALAPPDATA%\Programs\Trae CN` | 注册表 → 常规路径 → 客户端启动日志，多盘可用 |
+| 客户端补丁 | 按已知哈希匹配 `out/main.js` | 结构化校验 + 按版本隔离备份 + manifest 记录原始哈希 |
+| 同步写入 | 连续写入 | 每条之间 300ms 节流 |
+| 运行时命名空间 | `magpie-trae` / `trae-local` / 3498 | `magpie-trae-evergreen` / `trae-cn-evergreen` / 3499 |
+| 与原版共存 | — | 配置、端口、Agent ID、规则文件互不重叠 |
+
+**命名空间为什么要分开**：两套适配器若共用 `~/.config/magpie-trae/`，会互相覆盖 `connection.json`、`sync-status.json`，更危险的是覆盖 `managed-models.json`（恢复日志）与 `client-backups/`（回滚备份）——一个插件可能删掉另一个插件创建的模型，或用错的原文件还原客户端。因此本项目所有运行时状态都放在独立目录。
+
+## 兼容性
+
+支持 **Windows 上的 Trae CN**。国际版、macOS、Linux 尚未适配。
+
+| 客户端 | 状态 |
+| --- | --- |
+| Trae CN 3.4.18 | 上游已核验，本版沿用同一信封布局 |
+| Trae CN 3.4.20 | 上游已核验 |
+| Trae CN 3.4.22 | 本版实测：目录同步、模型增删、菜单热更新、实际对话均正常 |
+| 其它 3.4.x | 布局不变即可用；方案变更时会明确报 `trae_credential_key_unverified`，不会静默写入错误凭据 |
+
+不再维护「已验证构建」清单。放行的判断依据是：两个 DLL 里提取的常量能否组成合法的 AES-256-GCM 信封，以及该信封能否解开 Trae 账号目录里**已经存在**的 `ak` 密文。后者是密码学意义上的强校验，且与版本号无关。
 
 ## 安装
 
-先安装并登录 Trae CN，在 Magpie 配置可用的模型，然后运行：
+先安装并登录 Trae CN，在 Magpie 中配置可用的模型，然后：
 
 ```powershell
-magpie plugin add "github:lmy414/magpie-agent-trae#v0.3.4"
+magpie plugin add "github:CN-P5/magpie-trae-evergreen#new"
 ```
 
-也可以下载 [Release](https://github.com/lmy414/magpie-agent-trae/releases) 中的源码，进入解压后的目录，运行 `magpie plugin add .`。
+也可以下载源码后，进入目录执行 `magpie plugin add .`。
 
-1. 在 Magpie 的 Agent 页面找到 Trae，打开接入开关。列表较长时，展开底部“显示其余”区域。
-2. 首次安装客户端刷新组件，或 Trae 升级后重新安装该组件时，自行重启 Trae 一次。
-3. 在 Trae 的模型菜单选择带“· Magpie”的条目。之后新增、移除模型和断开接入会自动刷新已打开的窗口。
+1. 在 Magpie 的 Agent 页面找到 **Trae CN · Evergreen**，打开接入开关。列表较长时展开底部「显示其余」区域。
+2. 首次安装（或 Trae 升级后重装）客户端刷新组件后，自行重启 Trae 一次。
+3. 在 Trae 的模型菜单选择带「· Magpie」的条目。
 
-保持 Magpie 运行、Trae 登录。插件不会切换窗口焦点、修改输入框或自动选择模型。只安装本仓库与社区包中的一个版本，避免两个运行时同时管理同一套配置。
+保持 Magpie 运行、Trae 保持登录。插件不会切换窗口焦点、修改输入框或自动选择模型。
+
+### 从原版迁移
+
+两套插件的模型都指向各自的本地端口，不能平滑接管，需要一次干净切换：
+
+1. 在 Magpie 里**关闭原版 Trae 的接入开关**，等 `sync-status.json` 变为 `disconnected`——原版会删除它创建且你未手动修改的条目。
+2. 确认 Trae 模型菜单里不再有旧条目（手动改过的会保留，可自行删除）。
+3. 安装本插件并打开开关，新条目会在 3499 端口重新创建。
+
+不要在两个插件都启用的情况下反复切换，Trae 侧的 `mcp.json` 与规则文件是固定路径，无法隔离。
 
 ## 能力
 
@@ -47,43 +82,39 @@ magpie plugin add "github:lmy414/magpie-agent-trae#v0.3.4"
 
 插件把 Magpie 中选中的模型登记为 Trae 的自定义模型，并在本机启动一个请求桥接服务。TraeWork 仍使用 Trae 云端编排会话。模型调用经 Trae 原生反向隧道回到本机，再由桥接服务交给 Magpie。
 
-以下图示保留 `v0.3.3` 的实现快照，源码基线为 [`7cea0df`](https://github.com/lmy414/magpie-agent-trae/tree/7cea0df1c9e7fde864479fe9ac81a89c98021bf9)。0.3.4 沿用这些请求和同步流程，并增加对 Trae CN 3.4.20 指定构建的支持。图中的可选取消补丁仍只适用于 3.4.18。
-
 ![Magpie 与 Trae 的聊天请求、模型目录和凭据使用路径](assets/architecture.zh-CN.svg)
 
 ### 模型怎样进入 Trae
 
-[`trae.agent.js`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/trae.agent.js#L19) 实现 Magpie 的 Agent 接入契约。`connect()` 返回网关地址、网关密钥和所选模型的能力信息，由 Magpie 宿主写入 `connection.json`。Agent 的发现目录是 Trae 的数据目录，与连接配置分开，因此清空所选模型不会删除用于发现 Trae 的目录。
+`trae.agent.js` 实现 Magpie 的 Agent 接入契约。`connect()` 返回网关地址、网关密钥和所选模型的能力信息，由 Magpie 宿主写入 `connection.json`。Agent 的发现目录是 Trae 的数据目录，与连接配置分开，因此清空所选模型不会删除用于发现 Trae 的目录。
 
-[`sync.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/sync.mjs#L45) 将模型转换为 Trae 的 `custom_openai_compatible` 配置。映射内容包括模型 ID、名称、上下文长度、输出上限、图片能力和思考档位。显示名称追加“· Magpie”，请求地址指向本地桥接的 `/v1/chat/completions`。
+`sync.mjs` 将模型转换为 Trae 的 `custom_openai_compatible` 配置，映射模型 ID、名称、上下文长度、输出上限、图片能力和思考档位。显示名称追加「· Magpie」，请求地址指向本地桥接的 `/v1/chat/completions`。
 
-Trae 将这些自定义模型保存在账户服务中。[`trae-api.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/trae-api.mjs#L11) 读取本机已登录 Trae 的 JWT、设备信息和版本信息，调用模型查询、添加与更新接口。删除通过更新接口的 `action: "delete"` 完成。插件不直接写入 Trae 的 SQLite 模型缓存。
+Trae 把这些自定义模型保存在账户服务中。`trae-api.mjs` 读取本机已登录 Trae 的 JWT、设备信息和版本信息，调用模型查询、添加与更新接口。删除通过更新接口的 `action: "delete"` 完成。插件不直接写入 Trae 的 SQLite 模型缓存。
 
-Trae 要求凭据使用原生编码格式。[`trae-local-token.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/trae-local-token.mjs#L36) 校验客户端版本和 DLL 哈希，从本机 DLL 提取内置加密材料，再用 AES-256-GCM 编码本地桥接标记。安装包不包含这些 DLL 或内置密钥，但运行时确实会读取它们。
+Trae 要求凭据使用原生编码格式。`trae-local-token.mjs` 从本机 DLL 提取内置加密材料，用 AES-256-GCM 编码本地桥接标记；提取结果必须能解开账号目录里已有的 `ak` 才会被采用。安装包不包含这些 DLL 或内置密钥，但运行时确实会读取它们。
 
-此前 `invalid ak` 的关键修复在 [`TraeAPI.call()`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/trae-api.mjs#L39)：**AK 和空 SK 都必须使用原生编码。** 模型管理接口接受明文空 SK，实际聊天校验却会拒绝。当前代码在发送写入请求前统一编码空 SK。
+**AK 和空 SK 都必须使用原生编码。** 模型管理接口接受明文空 SK，实际聊天校验却会拒绝。
 
 ### 聊天请求怎样转发
 
-图中的前 3 步属于 Trae 自己的运行时，依据此前 TraeWork 请求排查和实际聊天验证。反向隧道由 Trae 提供，本插件没有另建公网隧道。插件代码从本地 HTTP 桥接开始接管请求。
-
-[`bridge.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/bridge.mjs#L65) 默认监听 `127.0.0.1:3498`。它只接受本机来源，拒绝带浏览器 `Origin` 的请求，并检查本地 Host、桥接标记和所选模型 ID。
+`bridge.mjs` 默认监听 `127.0.0.1:3499`。它只接受本机来源，拒绝带浏览器 `Origin` 的请求，并检查本地 Host、桥接标记和所选模型 ID。
 
 桥接保留消息体中的工具定义、图片和思考参数，重新构造发往 Magpie 本机网关的请求。鉴权头改为 Magpie 网关密钥，Trae 的云端鉴权头不继续转发。响应通过原始流管道返回，避免破坏分段工具参数和用量信息。下游连接提前关闭时，桥接会销毁对应的上游 HTTP 请求。
 
-因此，“模型地址在本机”不表示 TraeWork 的会话编排也在本机。Trae 云端仍参与会话处理；最终模型服务由 Magpie 的供应商与路由配置决定。
+「模型地址在本机」不表示 TraeWork 的会话编排也在本机：Trae 云端仍参与会话处理，最终模型服务由 Magpie 的供应商与路由配置决定。
 
 ### 模型变化、断开和客户端刷新
 
 ![模型同步、断开恢复与两种客户端修改的行为](assets/lifecycle.zh-CN.svg)
 
-[`startModelSync()`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/sync.mjs#L227) 每 5 秒检查连接配置；内容未变化时，每 60 秒重新核对原生目录。这些间隔不代表同步一定会在相同时间内完成，账户接口的响应和回读确认也需要时间。
+`startModelSync()` 每 5 秒检查连接配置；内容未变化时，每 60 秒重新核对原生目录。这些间隔不代表同步一定会在相同时间内完成，账户接口的响应和回读确认也需要时间。
 
-模型移除和断开使用同一套[撤回逻辑](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/sync.mjs#L201)。恢复日志记录插件管理的模型 ID、接管前配置和最后写入的指纹。插件新建且未被用户修改的模型会删除；接管且未被用户修改的模型恢复原配置；用户后来改过的条目保留，并产生警告。账号变化时停止使用旧账号的恢复日志。
+模型移除和断开使用同一套撤回逻辑。恢复日志记录插件管理的模型 ID、接管前配置和最后写入的指纹。插件新建且未被用户修改的模型会删除；接管且未被用户修改的模型恢复原配置；用户后来改过的条目保留，并产生警告。账号变化时停止使用旧账号的恢复日志。
 
-每次写操作先记录待完成状态，再调用接口并回读确认。若响应丢失，下次同步先查询原生目录，判断操作是否已经完成，避免重复创建或误删。
+每次写操作先记录待完成状态，再调用接口并回读确认；响应丢失时，下次同步先查询原生目录判断操作是否已完成，避免重复创建或误删。多条模型连续创建时按 300ms 间隔节流，降低被账户接口限流的概率。
 
-模型目录写入成功后，同步器生成不包含原始凭据的目录修订号。[`trae-refresh-notifier.cjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/trae-refresh-notifier.cjs#L9) 在 Trae 主进程中每 1 秒检查该修订号，变化时向各个窗口发送 Trae 原生模型变更通知，由窗口重新加载目录。
+模型目录写入成功后，同步器生成不包含原始凭据的目录修订号。`trae-refresh-notifier.cjs` 在 Trae 主进程中每 1 秒检查该修订号，变化时向各个窗口发送 Trae 原生模型变更通知，由窗口重新加载目录。
 
 ### 客户端文件的修改范围
 
@@ -92,29 +123,25 @@ Trae 要求凭据使用原生编码格式。[`trae-local-token.mjs`](https://git
 | 模型菜单热更新 | 插件默认启动时尝试安装 | 校验并备份 `out/main.js`，追加加载语句，安装 `out/magpie-model-refresh.cjs` | 执行 `node cli.mjs restore-client` 后重启 Trae |
 | 取消卡死兼容修复 | 源码中的可选脚本，手动执行 | 校验并备份指定 `solo-lite` 程序文件，修复旧订阅延迟状态和取消确认后的状态核对 | 同一脚本使用 `--restore` 后重启 Trae |
 
-热更新的安装入口在 [`index.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/index.mjs#L9)，文件修改和恢复在 [`client-refresh.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/client-refresh.mjs#L16)。**断开接入会撤回模型配置，客户端入口补丁需要单独恢复。**
+热更新的安装入口在 `index.mjs`，文件修改和恢复在 `client-refresh.mjs`。不想改动客户端文件时，设置环境变量 `MAGPIE_TRAE_NO_CLIENT_PATCH=1` 即可跳过——代价是新增模型后需重启 Trae 才能看到。
 
-[`scripts/trae-cancel-patch.mjs`](https://github.com/lmy414/magpie-agent-trae/blob/7cea0df1c9e7fde864479fe9ac81a89c98021bf9/scripts/trae-cancel-patch.mjs#L14) 不包含在运行安装包中，也不会自动执行。它忽略已被替换订阅发来的延迟状态，并在取消已确认且没有活动流时，重新核对后端终态，避免一直等待不会再到来的结束事件。测试脚本中的 `new Function` 用于提取实际源码做回归验证，不在日常请求路径中。
+补丁只追加两行、不改动已有字节；原始文件按 Trae 版本备份到 `client-backups/<版本>/main.original.js`，并在 `manifest.json` 记录原始 SHA-256。若该文件内容与备份不一致（例如你手动改过或被其它工具改过），插件会拒绝覆盖并报 `trae_client_refresh_build_unsupported`。**断开接入会撤回模型配置，客户端入口补丁需要单独恢复。**
 
-此版本记录了 54 项单元测试、9 项隔离 Magpie 集成检查及一次实际 DeepSeek 聊天验证。取消补丁有 6 项源码回归检查，完整的手动取消验收仍待补充。这些结果不代表其他 Trae 构建或所有模型都已验证，也不代表 Trae 官方授权。
+`scripts/trae-cancel-patch.mjs` 不包含在运行安装包中，也不会自动执行。它忽略已被替换订阅发来的延迟状态，并在取消已确认且没有活动流时重新核对后端终态。**仅适用于 3.4.18 构建。**
 
 ## 恢复与卸载
 
-在 Magpie 关闭 Trae 接入，等待同步状态变为 `disconnected`，再卸载插件。插件只处理日志中记录的模型 ID：自己新增的条目会删除，接管过的条目会还原。手动修改过的条目会保留，并显示 `model_edited_in_trae`。
+在 Magpie 关闭 Trae 接入，等待同步状态变为 `disconnected`，再卸载插件。插件只处理日志中记录的模型 ID：自己新增的条目会删除，接管过的条目会还原，手动修改过的条目会保留并报告 `model_edited_in_trae`。
 
-创建、更新和删除都有恢复日志。响应丢失时，插件读取原生目录核对结果；删除只有在确认条目不存在后才完成。账户发生变化时，插件停止使用原账户的恢复日志。
-
-客户端刷新组件独立于模型配置。卸载插件后，在源码目录执行下列命令可恢复原入口文件，然后自行重启 Trae：
+客户端刷新组件独立于模型配置。卸载插件后，在源码目录执行：
 
 ```powershell
 node cli.mjs restore-client
 ```
 
-不要在恢复前删除 `.config/magpie-trae`。该目录包含恢复日志和备份。
+然后自行重启 Trae。**恢复前不要删除 `%USERPROFILE%\.config\magpie-trae-evergreen`**，该目录包含恢复日志和备份。
 
 ## 诊断
-
-在源码目录运行：
 
 ```powershell
 node cli.mjs status
@@ -123,49 +150,53 @@ node cli.mjs models
 
 | 文件 | 位置 |
 | --- | --- |
-| 连接信息 | `%USERPROFILE%\.config\magpie-trae\connection.json` |
+| 连接信息 | `%USERPROFILE%\.config\magpie-trae-evergreen\connection.json` |
 | 模型恢复日志 | 同目录的 `managed-models.json` |
 | 同步状态 | 同目录的 `sync-status.json` |
+| 凭据缓存 | 同目录的 `local-credential.json` |
 | 客户端刷新记录 | 同目录的 `client-refresh-status.json` |
-| 客户端入口备份 | 同目录的 `client-backups\<Trae 版本>`，3.4.18 和 3.4.20 分别保存 |
+| 客户端入口备份 | 同目录的 `client-backups\<Trae 版本>` |
+
+与原版（`magpie-trae`）的目录**完全独立**，两者互不读取、互不覆盖。
+
+常见错误码：
+
+| 错误 | 含义 |
+| --- | --- |
+| `trae_installation_unavailable` | 找不到 Trae 安装目录；可用 `TRAE_APP` 显式指定 |
+| `trae_credential_profile_unknown` | 两个 DLL 里没有提取到合法的加密常量 |
+| `trae_credential_key_unverified` | 提取到的密钥解不开账号目录里的 `ak`，说明客户端方案真的变了 |
+| `trae_credential_invalid` | 凭据密文格式非法或校验失败 |
+| `trae_sign_in_expired` | Trae 登录态过期，重新登录 |
+| `trae_client_refresh_build_unsupported` | `out/main.js` 与备份不一致，未覆盖 |
+| `trae_api_4024` | 同一 `(provider, model_name, base_url)` 已存在 |
 
 连接信息和恢复日志可能包含凭据，请勿上传到 Issue。报告问题时提供版本、错误代码及已去除凭据的状态信息即可。
 
 ## 开发与验证
 
-无需安装 npm 依赖。Node.js 20 或更高版本可运行单元测试：
+无需安装 npm 依赖。Node.js 20 或更高版本：
 
 ```powershell
 npm test
 npm pack
 ```
 
-`npm run acceptance` 需要本机的 Magpie 与其 Bun 宿主。脚本使用临时用户目录及本地测试服务，检查 Agent 注册、目录变化、转发和资料库恢复，不调用真实模型账户。
+`npm run acceptance` 需要本机的 Magpie 与其 Bun 宿主，使用临时用户目录及本地测试服务，不调用真实模型账户。
 
-0.3.3 的验证包括 54 项单元测试、9 项隔离 Magpie 集成检查，以及已打开 TraeWork 窗口中的新增、替换和断开测试。目录核对完成后的菜单更新约需 1.1～1.6 秒。实际 DeepSeek 聊天已通过验证；该结果不代表所有上游模型都已验证。
+当前验证情况：
 
-0.3.4 的 56 项单元测试在 Node 和 Bun 下通过，增加了跨版本备份恢复和未知 DLL 构建拒绝检查。9 项隔离 Magpie 集成检查也通过。在 Trae CN 3.4.20 上，已验证临时模型的新增、修改、删除和回读，测试条目随后已清理。用户重启后确认实际增删模型与菜单刷新正常。
+- 60 项单元测试在 Node 22 与 Bun 1.4.4 下通过。
+- Trae CN 3.4.22（安装在 `D:\Trae CN`）实测：安装目录定位、13 条目录读取、`ak` 密文解密、空 SK 编码、`out/main.js` 结构校验全部通过；随后完成 11 条模型同步与菜单热更新，实际使用正常。
+- 上游 0.3.3 / 0.3.4 的验证记录（54 / 56 项测试、9 项隔离集成检查、3.4.18 与 3.4.20 实机）仍然有效，本版沿用其同步与撤回逻辑。
 
-本次兼容修复不包含长会话的 `3003 / SSE finish` 修复。排查中观察到工具结果提交后的续接失败，以及 Trae 云端返回 500；尚未确认其根因，不能据此认定上下文超限。
-
-## 可选的取消兼容修复
-
-Trae CN 3.4.18 存在一种会话状态竞态：请求已经结束，旧的延迟状态仍把会话标记为运行中，随后取消会等待一个不会再到来的结束事件。
-
-源码目录提供单独的、按构建哈希校验的修复脚本。它丢弃旧订阅的延迟状态，在无活动流的取消确认后核对后端终态。**该脚本仅适用于已核验的 3.4.18 构建，未适配 3.4.20。** 它不随插件自动执行，也不包含在运行安装包中：
-
-```powershell
-node scripts/trae-cancel-patch.mjs --check
-npm run test:cancel
-node scripts/trae-cancel-patch.mjs --apply
-# 需要撤回时：
-node scripts/trae-cancel-patch.mjs --restore
-```
-
-执行修复或撤回后自行重启 Trae。脚本的原文件备份保存在源码目录的 `artifacts` 下。六项源码回归测试通过，完整的手动取消验收仍待补充。Trae 升级后应重新核验，不能直接套用旧补丁。
+本次兼容修复不包含长会话的 `3003 / SSE finish` 问题。排查中观察到工具结果提交后的续接失败，以及 Trae 云端返回 500；尚未确认其根因。
 
 ## 许可与来源
 
 项目代码使用 [MIT License](LICENSE)。图标归属见 [ASSET_NOTICE.md](ASSET_NOTICE.md)，复用的登录信息解码代码及许可证见 [THIRD_PARTY.md](THIRD_PARTY.md)。项目不附带 Trae 客户端文件。
 
-接口与实现参考：[Magpie Agent 文档](https://usemagpie.ai/docs/plugins#agents)、[Magpie 社区插件](https://github.com/magpie-community/plugins)及本机 Trae 的指定构建。
+- 上游项目：[lmy414/magpie-agent-trae](https://github.com/lmy414/magpie-agent-trae)（MIT），本项目的直接基础。
+- 接口与实现参考：[Magpie Agent 文档](https://usemagpie.ai/docs/plugins#agents)、[Magpie 社区插件](https://github.com/magpie-community/plugins)。
+
+本项目为非官方适配，与 Trae、字节跳动无关联，也未获得官方授权。

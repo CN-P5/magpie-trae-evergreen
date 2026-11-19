@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { locateTraeApp } from './trae-install.mjs';
+import { clientBackups } from './identity.mjs';
 
 // The loader is the only change made to the client: two appended lines at the
 // very end of the Electron main bundle. Nothing before them is rewritten.
@@ -40,7 +41,7 @@ export function installClientRefresh({ local = process.env.LOCALAPPDATA, home = 
   const current = fs.readFileSync(main, 'utf8');
   const original = LOADER_PATTERN.test(current) ? current.replace(LOADER_PATTERN, '') : current;
 
-  const directory = path.join(home, '.config/magpie-trae/client-backups', version);
+  const directory = path.join(clientBackups(home), version);
   fs.mkdirSync(directory, { recursive: true });
   const backup = path.join(directory, 'main.original.js');
   let recorded;
