@@ -66,6 +66,25 @@ function fingerprint(entry) {
 function matching(entry, request) {
   return entry.model === request.model_name && entry.provider === request.provider && entry.baseURL === request.base_url;
 }
+// Trae dedupes a model by (provider, model, base_url). The same display name on
+// another loopback port is therefore a brand new model, and the picker ends up
+// with two entries that look identical.
+const LOOPBACK_BASE = /^https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)(?:\/|$)/i;
+export const MAGPIE_NAME_SUFFIX = /·\s*Magpie\s*$/;
+export function loopbackPort(entry) {
+  const match = LOOPBACK_BASE.exec(String(entry?.baseURL || ''));
+  return match ? Number(match[1]) : null;
+}
+// Used only by the explicit cleanup command, never by an automatic sync: a
+// listening bridge may belong to another adapter the user still wants.
+async function bridgeAnswers(port, request = fetch) {
+  try {
+    const response = await request(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(800) });
+    if (!response.ok) return false;
+    const body = await response.json();
+    return typeof body?.name === 'string' && body.name.length > 0;
+  } catch { return false; }
+}
 function desiredMatches(entry, request, status = true) {
   return matching(entry, request) && entry.ak === request.ak && entry.name === request.display_name && entry.status === status &&
     isDeepStrictEqual(JSON.parse(JSON.stringify(entry.detail)), JSON.parse(JSON.stringify(request.config_detail)));
@@ -187,6 +206,15 @@ export async function syncModels({ paths = syncPaths(), apiFactory = () => new T
           managed = { id: entry.id, created: false, before: entry, last: fingerprint(entry) };
           state.entries[request.model_name] = managed; save();
         } else {
+          // Never create a second entry that would look identical in the
+          // picker: a bridge entry carrying this name is either an orphan of a
+          // previous install or another running adapter. Both need the user's
+          // decision, so report instead of duplicating.
+          const twin = remote.find(e => e.name === request.display_name && loopbackPort(e) !== null);
+          if (twin) {
+            warnings.push({ model: request.model_name, code: 'duplicate_display_name' });
+            continue;
+          }
           state.pending = { kind: 'add', model: request.model_name, request, credentialFormat: CREDENTIAL_FORMAT }; save();
           await throttle();
           await api.call('add_custom_model', request); await refresh(list => list.some(e => matching(e, request) && e.name === request.display_name));
@@ -254,4 +282,45 @@ export function startModelSync(options = {}) {
   const ready = tick();
   const timer = setInterval(tick, options.interval ?? 5000); timer.unref?.();
   return { ready, stop: async () => { stopped = true; clearInterval(timer); await busy; } };
+}
+
+// An install that was replaced or renamed leaves its entries behind under a
+// bridge port nobody listens on any more. Those entries are absent from the
+// journal, so no disconnect will ever collect them, and Trae keeps showing them
+// next to the current ones. Removal is opt-in and only touches entries whose
+// bridge does not answer.
+export async function reclaimStaleEntries({ paths = syncPaths(), apiFactory = () => new TraeAPI(readSession()),
+  port = DEFAULT_PORT, apply = false, request = fetch, writeDelayMs = 300 } = {}) {
+  const state = read(paths.state, null);
+  const api = await apiFactory();
+  let remote = await api.list();
+  const owned = new Set(Object.values(state?.entries || {}).map(managed => String(managed.id)));
+  // A model that is still selected is never cleanup material: sync either adopts
+  // it or reports it. Only leftovers of a previous selection are removable.
+  const control = read(paths.control, null);
+  const endpoint = `http://127.0.0.1:${port}/v1/chat/completions`;
+  const selected = new Set((control?.models || [])
+    .map(model => `${typeof model.id === 'string' ? model.id.trim() : ''}@${endpoint}`));
+  const candidates = remote.filter(entry => MAGPIE_NAME_SUFFIX.test(entry.name || '') &&
+    loopbackPort(entry) !== null && !owned.has(String(entry.id)) &&
+    !selected.has(`${entry.model}@${entry.baseURL}`));
+  const stale = [];
+  for (const entry of candidates) {
+    const at = loopbackPort(entry);
+    // A live port only proves that *something* answers, not that this entry is
+    // owned. An unowned entry on our own port is a leftover of an earlier run
+    // of this adapter: if it is still selected, the next sync recreates it with
+    // a journal record. A foreign port is only removed when nothing answers.
+    const reachable = at === port ? true : await bridgeAnswers(at, request);
+    const removable = !reachable || at === port;
+    let removed = false;
+    if (apply && removable) {
+      await api.call('update_custom_model', { action: 'delete', id: Number(entry.id) });
+      removed = true;
+      if (writeDelayMs > 0) await delay(writeDelayMs);
+    }
+    stale.push({ id: entry.id, name: entry.name, baseURL: entry.baseURL, reachable, removable, removed });
+  }
+  if (apply && stale.some(item => item.removed)) remote = await api.list();
+  return { currentPort: port, checked: remote.length, stale, removed: stale.filter(item => item.removed).length };
 }

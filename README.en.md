@@ -62,7 +62,16 @@ The two adapters point models at different loopback ports, so there is no seamle
 1. Turn off the upstream Trae agent in Magpie and wait for `disconnected`; it removes the entries it created and you did not edit.
 2. Install this plugin and enable it. Entries are created again on port 3499.
 
-Do not keep both enabled: Trae's `mcp.json` and rules file are fixed paths that cannot be namespaced.
+**If a pre-rename install or a different model selection left entries behind**, the account can hold `· Magpie` names pointing at a port nothing listens on. Selecting them fails, and the recovery journal never saw them, so no disconnect removes them:
+
+```powershell
+node cli.mjs cleanup           # dry run, lists only
+node cli.mjs cleanup --apply   # removes unselected entries whose bridge is silent
+```
+
+Cleanup only touches suffixed loopback entries that are neither journaled nor currently selected. Another adapter that is still listening, and every selected model, are left alone.
+
+Do not keep both adapters enabled: Trae's `mcp.json` and rules file are fixed paths that cannot be namespaced.
 
 ## Behavior
 
@@ -108,6 +117,9 @@ node cli.mjs models
 | `trae_credential_key_unverified` | The extracted key cannot decrypt an existing `ak` |
 | `trae_sign_in_expired` | Trae session expired; sign in again |
 | `trae_client_refresh_build_unsupported` | `out/main.js` differs from its backup; left untouched |
+| `duplicate_display_name` (warning) | A same-name `· Magpie` entry already points at another loopback port; no second copy is created. Run `node cli.mjs cleanup` after checking |
+
+**Why duplicates appear at all:** Trae dedupes by `(provider, model_name, base_url)`; the display name is not part of the key. Changing the bridge port therefore looks like a new model, and the server accepts a second identically named entry. This version refuses to create one and reports instead.
 
 ## Validation
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { syncModels, syncPaths, modelRequest } from '../sync.mjs';
+import { syncModels, syncPaths, modelRequest, reclaimStaleEntries, loopbackPort } from '../sync.mjs';
 import { TraeAPI, readSession } from '../trae-api.mjs';
 import { encodeCredential, decodeCredential } from '../trae-local-token.mjs';
 
@@ -326,4 +326,51 @@ test('session reads use the real client shape and reject expired or ambiguous id
   save(1); assert.throws(() => readSession({ roaming, local }), /trae_sign_in_expired/);
   save(Math.floor(Date.now() / 1000) + 600, { 'iCubeAuthInfo://icube-dc:87654321': 'fixture' });
   assert.throws(() => readSession({ roaming, local }), /trae_device_unavailable/);
+});
+
+test('a same-name entry on another bridge port is reported, never duplicated', async t => {
+  const f = setup(t);
+  f.api.entries.push({ id: '9', model: 'fixture/one', provider: 'custom_openai_compatible', ak: 'orphan',
+    name: 'One · Magpie', baseURL: 'http://127.0.0.1:3498/v1/chat/completions', status: true,
+    config: { auth_type: 0 }, detail: {} });
+  await f.sync();
+  assert.equal(f.api.entries.filter(e => e.name === 'One · Magpie').length, 1);
+  assert.equal(f.api.writes.filter(w => w.method === 'add_custom_model').length, 1);
+  const state = f.state();
+  const status = JSON.parse(fs.readFileSync(f.paths.status, 'utf8'));
+  assert.deepEqual(status.warnings, [{ model: 'fixture/one', code: 'duplicate_display_name' }]);
+  assert.ok(!state.entries['fixture/one']);
+  assert.ok(f.api.entries.some(e => e.name === 'Two · Magpie'));
+});
+
+test('cleanup removes only stale entries whose bridge is silent', async t => {
+  const f = setup(t);
+  const entry = (id, name, baseURL, model = 'fixture/old') => ({ id, model, provider: 'custom_openai_compatible',
+    ak: 'orphan', name, baseURL, status: true, config: { auth_type: 0 }, detail: {} });
+  f.api.entries.push(entry('11', 'One · Magpie', 'http://127.0.0.1:3498/v1/chat/completions'),
+    entry('12', 'Two · Magpie', 'http://127.0.0.1:3999/v1/chat/completions'),
+    entry('14', 'Mine · Magpie', 'http://127.0.0.1:3499/v1/chat/completions'),
+    entry('13', 'Handmade', 'https://api.example.com/v1/chat/completions'));
+  const request = async url => ({ ok: String(url).includes(':3999/'), json: async () => ({ name: 'magpie-trae-evergreen' }) });
+  const dry = await reclaimStaleEntries({ paths: f.paths, apiFactory: () => f.api, request, writeDelayMs: 0 });
+  assert.equal(dry.stale.length, 3);
+  assert.equal(dry.stale.filter(item => item.removable).length, 2);
+  assert.equal(dry.removed, 0);
+  assert.equal(f.api.entries.length, 4);
+  const applied = await reclaimStaleEntries({ paths: f.paths, apiFactory: () => f.api, request, apply: true, writeDelayMs: 0 });
+  assert.equal(applied.removed, 2);
+  assert.deepEqual(f.api.entries.map(e => e.id).sort(), ['12', '13']);
+  assert.equal(loopbackPort(f.api.entries[0]), 3999);
+  assert.equal(loopbackPort(f.api.entries[1]), null);
+});
+
+test('a journaled entry is never treated as stale, even on a silent port', async t => {
+  const f = setup(t);
+  await f.sync();
+  const before = f.api.entries.length;
+  f.api.entries.forEach(e => { e.baseURL = e.baseURL.replace(':3499', ':3498'); });
+  const result = await reclaimStaleEntries({ paths: f.paths, apiFactory: () => f.api,
+    request: async () => ({ ok: false, json: async () => ({}) }), apply: true, writeDelayMs: 0 });
+  assert.equal(f.api.entries.length, before);
+  assert.equal(result.stale.length, 0);
 });

@@ -63,6 +63,15 @@ magpie plugin add "github:CN-P5/magpie-trae-evergreen#new"
 2. 确认 Trae 模型菜单里不再有旧条目（手动改过的会保留，可自行删除）。
 3. 安装本插件并打开开关，新条目会在 3499 端口重新创建。
 
+**如果之前装过改名前的版本**（`magpie-trae` / 3498）或换过 Magpie 里的模型选择，账号里可能留下「· Magpie」同名条目——它们指向一个已经没人监听的端口，选它们聊天会失败，而恢复日志里没有记录，断开也不会清理。先预演，再执行：
+
+```powershell
+node cli.mjs cleanup           # 只列出，不删除
+node cli.mjs cleanup --apply   # 删除确认无人监听的、且当前未选中的条目
+```
+
+清理只动两类东西：后缀为「· Magpie」、指向本机回环端口、**不在恢复日志里、也不在当前选择中**的条目。监听中的其它适配器、以及当前选中的模型都不会被删。
+
 不要在两个插件都启用的情况下反复切换，Trae 侧的 `mcp.json` 与规则文件是固定路径，无法隔离。
 
 ## 能力
@@ -170,6 +179,9 @@ node cli.mjs models
 | `trae_sign_in_expired` | Trae 登录态过期，重新登录 |
 | `trae_client_refresh_build_unsupported` | `out/main.js` 与备份不一致，未覆盖 |
 | `trae_api_4024` | 同一 `(provider, model_name, base_url)` 已存在 |
+| `duplicate_display_name`（警告） | 已有一个同名「· Magpie」条目指向别的本机端口。插件不会创建第二条，避免菜单里出现两个一样的名字；确认后运行 `node cli.mjs cleanup` |
+
+**为什么会出现同名重复**：Trae 判重只看 `(provider, model_name, base_url)`，显示名不参与。所以换端口（例如从 3498 改到 3499）等于换了一个模型，服务端会照单新建一条同名条目。本版在写入前增加了同名检测，遇到就跳过并给出警告，不再继续制造副本。
 
 连接信息和恢复日志可能包含凭据，请勿上传到 Issue。报告问题时提供版本、错误代码及已去除凭据的状态信息即可。
 

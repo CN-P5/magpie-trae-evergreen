@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createBridge, DEFAULT_PORT } from './bridge.mjs';
 import { installClientRefresh } from './client-refresh.mjs';
+import { reclaimStaleEntries } from './sync.mjs';
 import { PLUGIN_ID } from './identity.mjs';
 
 const command = process.argv[2] || 'status';
@@ -14,6 +15,11 @@ if (command === 'setup') {
   await bridge.listen();
   console.log(`Trae bridge listening on 127.0.0.1:${port}`);
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await bridge.close(); });
+} else if (command === 'cleanup') {
+  const apply = process.argv.includes('--apply');
+  const result = await reclaimStaleEntries({ apply, port });
+  console.log(JSON.stringify(result, null, 2));
+  if (!apply) console.error('Dry run: no entry was removed. Re-run with --apply to delete entries whose bridge is not answering.');
 } else if (command === 'status' || command === 'models') {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
@@ -21,4 +27,4 @@ if (command === 'setup') {
     if (!response.ok || status.name !== PLUGIN_ID) throw new Error();
     console.log(JSON.stringify(command === 'models' ? status.models : status, null, 2));
   } catch { console.error('Trae bridge is not answering. Keep Magpie running and enable this plugin.'); process.exitCode = 1; }
-} else { console.error(`Usage: ${PLUGIN_ID} status|models|setup|serve|restore-client`); process.exitCode = 1; }
+} else { console.error(`Usage: ${PLUGIN_ID} status|models|setup|serve|restore-client|cleanup [--apply]`); process.exitCode = 1; }
